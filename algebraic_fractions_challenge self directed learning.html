@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Algebraic Fraction Simplification Challenge</title>
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --success: #16a34a;
+            --danger: #dc2626;
+            --accent: #d97706;
+        }
+        body { font-family: sans-serif; background: #f8fafc; display: flex; justify-content: center; padding: 20px; }
+        .container { max-width: 650px; width: 100%; background: white; padding: 30px; border-radius: 16px; text-align: center; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .stats-bar { display: flex; justify-content: space-around; align-items: center; margin-bottom: 25px; font-weight: bold; font-size: 1.05rem; }
+        .lives-box { color: var(--danger); font-size: 1.2rem; }
+        .timer-box { background: #f1f5f9; color: #475569; padding: 8px 16px; border-radius: 20px; transition: all 0.3s; min-width: 60px; }
+        .timer-urgent { background: #fee2e2; color: #991b1b; animation: pulse 1s infinite; font-weight: 900; }
+        
+        /* Fraction UI Styles */
+        .fraction { display: inline-flex; flex-direction: column; vertical-align: middle; text-align: center; font-family: serif; font-size: 1.6rem; margin: 0 5px; }
+        .num { border-bottom: 2px solid #334155; padding-bottom: 5px; }
+        .den { padding-top: 5px; }
+        .fraction sup { font-size: 0.65em; vertical-align: super; }
+
+        .expression-display { font-size: 1.6rem; font-family: serif; background: #f1f5f9; padding: 25px; border-radius: 12px; margin-bottom: 15px; display: flex; justify-content: center; align-items: center; min-height: 80px; }
+        .options-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .option-btn { padding: 15px; font-size: 1.2rem; border-radius: 10px; border: 2px solid #cbd5e1; background: white; cursor: pointer; transition: all 0.2s; display: flex; justify-content: center; align-items: center; min-height: 80px; }
+        .option-btn:not(:disabled):hover { border-color: var(--primary); background: #f8fafc; }
+        .option-btn.correct { background: #dcfce7; border-color: var(--success); color: #15803d; font-weight: bold; }
+        .option-btn.wrong { background: #fee2e2; border-color: var(--danger); color: #991b1b; cursor: not-allowed; opacity: 0.7; }
+        
+        .hint-box { background: #fffbe3; color: #92400e; border: 1px solid #fef3c7; padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.95rem; display: none; }
+        .hint-btn { background: #f59e0b; color: white; padding: 6px 14px; border: none; border-radius: 20px; font-size: 0.9rem; cursor: pointer; margin-bottom: 15px; transition: background 0.2s; }
+        .hint-btn:hover { background: #d97706; }
+        
+        .factored-display { background: #eff6ff; color: #1e40af; border: 1px dashed #bfdbfe; padding: 12px; border-radius: 8px; margin-top: 15px; font-family: serif; font-size: 1.25rem; font-style: italic; }
+        .nav-btn { background: var(--primary); color: white; padding: 12px 30px; border: none; border-radius: 8px; font-size: 1.1rem; cursor: pointer; margin-top: 20px; display: inline-block; }
+        .nav-btn:hover { background: #4338ca; }
+        @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Fraction Simplification Challenge <span id="level-indicator" style="font-size: 1.2rem; color: var(--primary);"></span></h1>
+        <div class="stats-bar">
+            <div>Score: <span id="score">0</span></div>
+            <div class="lives-box" id="lives-display">❤️❤️❤️❤️❤️</div>
+            <div class="timer-box" id="timer-display">45s</div>
+        </div>
+        <div class="expression-display" id="expression">Click Start to Begin</div>
+        
+        <button id="hint-btn" class="hint-btn" onclick="showHint()" style="display: none;">💡 Need a Hint?</button>
+        <div id="hint-box" class="hint-box"></div>
+        
+        <div class="options-grid" id="options-container"></div>
+        <div id="feedback-area"></div>
+        
+        <button id="start-btn" class="nav-btn" onclick="startGame()">Start Game</button>
+        <button id="next-btn" class="nav-btn" onclick="nextQuestion()" style="display: none; background: #2563eb;">Next Question</button>
+    </div>
+
+    <script>
+        let score = 0, timeLeft = 45, lives = 5, timerInterval = null, currentQ = null, gameActive = false;
+
+        function gcd(x, y) {
+            return y === 0 ? Math.abs(x) : gcd(y, x % y);
+        }
+
+        function getRandomNonZero(min, max) {
+            let possibleValues = [];
+            for (let i = min; i <= max; i++) {
+                if (i !== 0 && i !== 1 && i !== -1) possibleValues.push(i);
+            }
+            return possibleValues[Math.floor(Math.random() * possibleValues.length)];
+        }
+
+        // Helper to pick a and b such that gcd(a, b) = 1 (relatively prime)
+        function getRelativelyPrimePair(min, max) {
+            let a = Math.floor(Math.random() * (max - min + 1)) + min;
+            let b = Math.floor(Math.random() * (max - min + 1)) + min;
+            while (gcd(a, b) !== 1) {
+                b = Math.floor(Math.random() * (max - min + 1)) + min;
+            }
+            return { a, b };
+        }
+
+        // Formats polynomial terms in simplest algebraic form
+        function fmtPoly(A, B, isMinus = false) {
+            let term1 = A === 1 ? "x" : (A === -1 ? "-x" : A + "x");
+            let effectiveVal = isMinus ? -B : B;
+            
+            if (effectiveVal < 0) {
+                return `(${term1} - ${Math.abs(effectiveVal)})`;
+            } else {
+                return `(${term1} + ${effectiveVal})`;
+            }
+        }
+
+        function fmtTerm(factor, polyStr) {
+            if (factor === 1) return polyStr;
+            if (factor === -1) return "-" + polyStr;
+            return factor + polyStr;
+        }
+
+        function createFractionHTML(numStr, denStr) {
+            return `<div class="fraction"><div class="num">${numStr}</div><div class="den">${denStr}</div></div>`;
+        }
+
+        // Helper to simplify fractions with coefficients (cancels GCD of numbers)
+        function makeSimplifiedFraction(mVal, polyNum, nVal, polyDen) {
+            let commonFactor = gcd(mVal, nVal);
+            let simplifiedM = mVal / commonFactor;
+            let simplifiedN = nVal / commonFactor;
+
+            if (simplifiedN < 0) {
+                simplifiedM = -simplifiedM;
+                simplifiedN = -simplifiedN;
+            }
+
+            let numFormatted = fmtTerm(simplifiedM, polyNum);
+            let denFormatted = fmtTerm(simplifiedN, polyDen);
+
+            if (simplifiedN === 1 && polyDen === "") {
+                return `<div style="font-size:1.5rem; font-family:serif; padding:10px;">${numFormatted}</div>`;
+            }
+
+            return createFractionHTML(numFormatted, denFormatted);
+        }
+
+        function generateQuestion() {
+            let qType;
+            let levelLabel = "";
+            let isLevel1 = (score < 30);
+            
+            if (isLevel1) {
+                qType = Math.floor(Math.random() * 2);
+                levelLabel = "(Level 1: Basic)";
+            } else if (score < 60) {
+                qType = Math.floor(Math.random() * 2) + 2;
+                levelLabel = "(Level 2: Intermediate)";
+            } else {
+                qType = Math.floor(Math.random() * 2) + 4;
+                levelLabel = "(Level 3: Advanced)";
+            }
+
+            document.getElementById("level-indicator").textContent = levelLabel;
+
+            // Pick coprime m and n to ensure no leftover common factors
+            let m = 1, n = 1;
+            if (!isLevel1) {
+                m = getRandomNonZero(-6, 6);
+                n = getRandomNonZero(-6, 6);
+                while(gcd(m, n) !== 1) { 
+                    n = getRandomNonZero(-6, 6); 
+                }
+            }
+            
+            let exprHTML = "";
+            let correctHTML = "";
+            let choices = [];
+            let hintText = "";
+
+            if (qType === 0) {
+                let a = Math.floor(Math.random() * 5) + 2; 
+                let k = Math.floor(Math.random() * 4) + 2; 
+                
+                let numStr = `x - ${a}`;
+                let denStr = `${k}x - ${k*a}`;
+                exprHTML = createFractionHTML(numStr, denStr);
+                
+                correctHTML = createFractionHTML("1", `${k}`);
+                hintText = `Factor out common coefficient ${k} from denominator: ${k}(x - ${a}). Cancel (x - ${a}).`;
+
+                choices.push(correctHTML);
+                choices.push(createFractionHTML(`${k}`, "1"));
+                choices.push(createFractionHTML("1", `x - ${a}`));
+                choices.push(createFractionHTML("1", `${k}(x + ${a})`));
+
+            } else if (qType === 1) {
+                let a = Math.floor(Math.random() * 4) + 2; 
+                let k = Math.floor(Math.random() * 4) + 2; 
+                
+                let numStr = `${k}x + ${k*a}`;
+                let denStr = `x<sup>2</sup> - ${a*a}`;
+                exprHTML = createFractionHTML(numStr, denStr);
+                
+                correctHTML = createFractionHTML(`${k}`, `x - ${a}`);
+                hintText = `Factor numerator as ${k}(x + ${a}) and denominator as (x - ${a})(x + ${a}). Cancel (x + ${a}).`;
+
+                choices.push(correctHTML);
+                choices.push(createFractionHTML(`${k}`, `x + ${a}`));
+                choices.push(createFractionHTML("1", `x - ${a}`));
+                choices.push(createFractionHTML(`x - ${a}`, `${k}`));
+
+            } else if (qType === 2) {
+                // Ensure a and b are relatively prime (gcd(a, b) = 1)
+                let { a, b } = getRelativelyPrimePair(2, 5);
+                
+                let numStr = isLevel1 ? `(${a}x - ${b})` : `${m}(${a}x - ${b})`;
+                let denStr = isLevel1 ? `(${a*a}x<sup>2</sup> - ${b*b})` : `${n}(${a*a}x<sup>2</sup> - ${b*b})`;
+                exprHTML = createFractionHTML(numStr, denStr);
+                
+                let pNum = "";
+                let pDen = fmtPoly(a, b, false);
+                correctHTML = makeSimplifiedFraction(m, pNum, n, pDen);
+                
+                hintText = `Factor denominator using difference of squares: (${a}x - ${b})(${a}x + ${b}). Cancel (${a}x - ${b}).`;
+
+                choices.push(correctHTML);
+                choices.push(makeSimplifiedFraction(m, pNum, n, fmtPoly(a, b, true)));
+                choices.push(makeSimplifiedFraction(m, fmtPoly(a, b, true), n, ""));
+                choices.push(makeSimplifiedFraction(n, pNum, m, fmtPoly(a, b, false)));
+
+            } else if (qType === 3) {
+                // Ensure a and b are relatively prime (gcd(a, b) = 1)
+                let { a, b } = getRelativelyPrimePair(2, 5);
+                
+                let numStr = isLevel1 ? `(${a*a}x<sup>2</sup> - ${b*b})` : `${m}(${a*a}x<sup>2</sup> - ${b*b})`;
+                let denStr = isLevel1 ? `(${a}x - ${b})` : `${n}(${a}x - ${b})`;
+                exprHTML = createFractionHTML(numStr, denStr);
+                
+                let pNum = fmtPoly(a, b, false);
+                let pDen = "";
+                correctHTML = makeSimplifiedFraction(m, pNum, n, pDen);
+                
+                hintText = `Factor numerator using difference of squares: (${a}x - ${b})(${a}x + ${b}). Cancel (${a}x - ${b}).`;
+
+                choices.push(correctHTML);
+                choices.push(makeSimplifiedFraction(m, fmtPoly(a, b, true), n, pDen));
+                choices.push(makeSimplifiedFraction(m, "", n, fmtPoly(a, b, false)));
+                choices.push(makeSimplifiedFraction(n, fmtPoly(a, b, false), m, pDen));
+
+            } else if (qType === 4) {
+                // Ensure a and b are relatively prime (gcd(a, b) = 1)
+                let { a, b } = getRelativelyPrimePair(2, 5);
+                
+                let numStr = isLevel1 ? `(${a*a}x<sup>2</sup> - ${b*b})` : `${m}(${a*a}x<sup>2</sup> - ${b*b})`;
+                let denStr = isLevel1 ? `(${a*a}x<sup>2</sup> + ${2*a*b}x + ${b*b})` : `${n}(${a*a}x<sup>2</sup> + ${2*a*b}x + ${b*b})`;
+                exprHTML = createFractionHTML(numStr, denStr);
+                
+                let pNum = fmtPoly(a, b, true);
+                let pDen = fmtPoly(a, b, false);
+                correctHTML = makeSimplifiedFraction(m, pNum, n, pDen);
+                
+                hintText = `Numerator: a² - b² = (a - b)(a + b). Denominator: a² + 2ab + b² = (a + b)². Cancel (a + b).`;
+
+                choices.push(correctHTML);
+                choices.push(makeSimplifiedFraction(m, fmtPoly(a, b, false), n, fmtPoly(a, b, true)));
+                choices.push(makeSimplifiedFraction(n, fmtPoly(a, b, true), m, fmtPoly(a, b, false)));
+                choices.push(createFractionHTML(`(x - ${b})`, `(x + ${a})`));
+
+            } else {
+                let numStr = "x<sup>2</sup> + 2xy + y<sup>2</sup> - z<sup>2</sup>";
+                let denStr = "x + y + z";
+                exprHTML = createFractionHTML(numStr, denStr);
+                
+                correctHTML = "<div style='font-size:1.5rem; font-family:serif; padding:10px;'>x + y - z</div>";
+                hintText = `Group first 3 terms: (x + y)² - z². Apply difference of squares: [(x + y) - z][(x + y) + z]. Cancel (x + y + z).`;
+
+                choices.push(correctHTML);
+                choices.push("<div style='font-size:1.5rem; font-family:serif; padding:10px;'>x + y + z</div>");
+                choices.push("<div style='font-size:1.5rem; font-family:serif; padding:10px;'>x - y - z</div>");
+                choices.push(createFractionHTML("1", "(x + y - z)"));
+            }
+
+            let cleanChoices = Array.from(new Set(choices));
+            while (cleanChoices.length < 4) {
+                cleanChoices.push(createFractionHTML("1", "x"));
+            }
+
+            return {
+                expr: exprHTML,
+                hcf: correctHTML, 
+                options: cleanChoices,
+                hint: hintText
+            };
+        }
+
+        function showHint() {
+            const hintBox = document.getElementById("hint-box");
+            if (currentQ && currentQ.hint) {
+                hintBox.textContent = currentQ.hint;
+                hintBox.style.display = "block";
+            }
+        }
+
+        function startGame() {
+            score = 0; 
+            lives = 5;
+            document.getElementById("score").textContent = score;
+            updateLivesDisplay();
+            document.getElementById("start-btn").style.display = "none";
+            gameActive = true; 
+            nextQuestion();
+        }
+
+        function updateLivesDisplay() {
+            document.getElementById("lives-display").textContent = "❤️️".repeat(lives) + "🖤".repeat(5 - lives);
+        }
+
+        function startTimer() {
+            clearInterval(timerInterval);
+            const display = document.getElementById("timer-display");
+            display.classList.remove("timer-urgent");
+            display.textContent = timeLeft + "s";
+            
+            timerInterval = setInterval(() => {
+                timeLeft--; 
+                display.textContent = timeLeft + "s";
+                
+                // Show hint button only when 20 seconds or less remain
+                if(timeLeft <= 20) {
+                    document.getElementById("hint-btn").style.display = "inline-block";
+                }
+                
+                if(timeLeft <= 10) display.classList.add("timer-urgent");
+                if(timeLeft <= 0) { clearInterval(timerInterval); endGame(); }
+            }, 1000);
+        }
+
+        function nextQuestion() {
+            if (!gameActive) return;
+            timeLeft = 45; 
+            document.getElementById("feedback-area").innerHTML = "";
+            document.getElementById("next-btn").style.display = "none";
+            
+            const hintBox = document.getElementById("hint-box");
+            hintBox.style.display = "none";
+            hintBox.textContent = "";
+            
+            // Hide hint button until timer hits <= 20 seconds
+            document.getElementById("hint-btn").style.display = "none";
+            
+            currentQ = generateQuestion();
+            document.getElementById("expression").innerHTML = currentQ.expr;
+            
+            const container = document.getElementById("options-container");
+            container.innerHTML = "";
+            
+            [...currentQ.options].sort(() => Math.random() - 0.5).forEach(opt => {
+                const btn = document.createElement("button");
+                btn.className = "option-btn"; btn.innerHTML = opt;
+                btn.onclick = () => {
+                    if(opt === currentQ.hcf) { 
+                        clearInterval(timerInterval); 
+                        document.querySelectorAll('.option-btn').forEach(b => b.disabled = true);
+                        btn.classList.add("correct"); 
+                        score += 10;
+                        document.getElementById("score").textContent = score;
+
+                        document.getElementById("feedback-area").innerHTML = '<div class="factored-display"><strong>Correct!</strong> Successfully factored and simplified the expression!</div>';
+                        document.getElementById("next-btn").style.display = "inline-block";
+                        document.getElementById("hint-btn").style.display = "none";
+                    } else { 
+                        btn.classList.add("wrong"); 
+                        btn.disabled = true; 
+                        lives--;
+                        updateLivesDisplay();
+                        
+                        if (lives <= 0) {
+                            setTimeout(endGame, 1000);
+                        }
+                    }
+                };
+                container.appendChild(btn);
+            });
+            startTimer();
+        }
+
+        function endGame() {
+            gameActive = false; 
+            clearInterval(timerInterval);
+
+            document.getElementById("expression").textContent = "Game Over!";
+            document.getElementById("options-container").innerHTML = "";
+            document.getElementById("next-btn").style.display = "none";
+            document.getElementById("hint-btn").style.display = "none";
+            document.getElementById("hint-box").style.display = "none";
+            document.getElementById("level-indicator").textContent = "";
+            
+            const startBtn = document.getElementById("start-btn");
+            startBtn.style.display = "inline-block";
+            startBtn.textContent = "Try Again";
+        }
+    </script>
+</body>
+</html>
